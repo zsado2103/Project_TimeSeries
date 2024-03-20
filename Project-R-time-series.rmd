@@ -1,0 +1,448 @@
+---
+title: "Szeregi czasowe: Średnia cena biletów lotniczych w USA w latach 1989-2023"
+author: "Żaneta Sado, Gabriela Ryszka"
+date: "2024-01-28"
+output:
+  pdf_document:
+    toc: yes
+    number_sections: yes
+    fig_caption: yes
+    highlight: tango
+    latex_engine: xelatex
+    keep_tex: yes
+  html_document:
+    toc: yes
+    df_print: paged
+  word_document:
+    toc: yes
+header-includes: \renewcommand{\contentsname}{Spis Treści}
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Wstęp
+
+Dane zostały pobrane ze strony: <https://fred.stlouisfed.org/series/CUSR0000SETG01?fbclid=IwAR0k8EK9yj0KOWWWELlewl2fH2q0nJ3mfb3QVBpMiW8PYfcAJTY9RjowI_k>.
+Zakres danych jest pomiędzy 01.07.1989r.
+a 01.12.2023r.
+Mamy 420 obserwacji, a nasze dane zawierają 2 zmienne:
+
+-   Data-\> Data, będąca początkiem każdego miesiąca
+
+-   Numbers-\> Uśredniona cena biletów
+
+# Wstępna analiza danych
+
+Wczytujemy teraz nasze dane:
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(readxl)
+Dane<-read_excel("cost.xlsx") 
+Dane$Numbers<-(as.numeric(Dane$Numbers))
+library(tibble)
+library(tidyverse)
+library(MASS)
+library(TSA)
+```
+
+```{r, echo=FALSE, warning=FALSE}
+Numbers<-Dane %>% .$Numbers 
+par(mfrow=c(1,1),col="blue")
+options(scipen = 999)
+plot(Numbers,type="l",col="brown",xlab = "",ylab="Średnia cena",axes=FALSE) 
+skala<-seq(from=1, to=(length(Numbers)[1]),by=12)
+axis(side=1,cex.axis=0.6,at=skala,padj=1,labels=Dane$Data[skala],font=1,adj=1,las=2)
+axis(2)
+box()
+```
+
+Widzimy, że średnie ceny biletów lotniczych w USA rosły, natomiast znaczny spadek został spowodowany Covidem i obostrzeniami z nim związanymi.
+
+```{r, echo=FALSE, warning=FALSE}
+library(forecast)
+Dane1<-Dane$Numbers
+tsdisplay(Dane1, main="Średnia cena biletów")
+
+```
+
+Wszystkie słupki w ACF znajdują się poza przedziałem.
+Odrzucamy zatem hipotezę o tym, że szereg jest realizacją procesu IID.
+Widać, że ACF powoli wygasa, co jest związane z występowaniem trendu liniowego.
+
+# Badanie stacjonarności
+
+## Bazowy szereg czasowy
+
+Hipoteza zerowa w teście Augmented Dickey-Fuller: nie wiemy, czy proces jest stacjonarny, natomiast H1 - jest stacjonarny.
+Przez to, że p-value wyszło większe - nie możemy odrzucić hipotezy zerowej.
+
+```{r, echo=FALSE, warning=FALSE}
+library(tseries)
+Dane_b<-Dane$Numbers
+adf.test(Dane_b) 
+```
+
+Natomiast test KPSS, gdzie hipoteza zerowa mówi o stacjonarności - zwrócił p-value = 0.01.
+Jest ona poniżej 0.05, dlatego hipoteza zerowa mówiąca o stacjonarności zostaje odrzucona.
+
+```{r, echo=FALSE, warning=FALSE}
+kpss.test(Dane_b)
+```
+
+Odrzuciliśmy zatem stacjonarność naszego pierwotnego szeregu.
+
+## Stacjonarność logarytmicznych stóp zwrotu.
+
+Ponieważ pierwotny szereg nie jest stacjonarny, rozważmy logarytmiczne stopy zwrotu:
+
+```{r echo=FALSE, warning=FALSE}
+
+lnreturns<-diff(log(Dane_b))
+plot(lnreturns, type="l", ylab="Logarytmiczna stopa zwrotu")
+```
+
+Przeprowadźmy dla nich testy ADF oraz KPSS.
+
+```{r, echo=FALSE, warning=FALSE}
+adf.test(lnreturns) 
+```
+
+Test ADF odrzuca nam hipotezę zerową na rzecz alternatywnej - że szereg jest stacjonarny.
+
+```{r, echo=FALSE, warning=FALSE}
+kpss.test(lnreturns)
+```
+
+Zaś z KPSS nie możemy odrzucić hipotezy zerowej, która mówi że szereg jest stacjonarny.
+
+# Proces ARMA(p,q)
+
+Ponieważ ARMA zakłada, że dane są stacjonarne, dlatego przyjrzymy się ponownie logarytmicznym stopom zwrotu, a zwłaszcza ich wykresom ACF i PACF:
+
+```{r, echo=FALSE, warning=FALSE}
+
+x <-log(length(lnreturns))
+par(mfrow=c(2,1), mar=c(5, 4, 4, 2) + 0.1)  
+acf(lnreturns,20,drop.lag.0 = TRUE, main="Wykres ACF dla logarytmicznych stóp zwrotu")
+pacf(lnreturns,20,main=" Wykres PACF dla logarytmicznych stóp zwrotu ")
+```
+
+Uwzględniając, że istotne są w tym przypadku słupki do opóźnienia (log(n)), czyli do 6, kandydatami procesu ARMA są: ARMA(1,0), ARMA(0,1), ARMA(1,1), ARMA(1, 2) oraz ARMA(0, 2).
+Rozważając każdy z tych modeli:
+
+```{r, echo=FALSE, warning=FALSE}
+(dane.fit1 = stats::arima(lnreturns, order = c(1, 0, 1)))
+(dane.fit1 = TSA::arima(lnreturns, order = c(1, 0, 1)))
+(dane.fit2 = stats::arima(lnreturns, order = c(1, 0, 0)))
+(dane.fit3 = stats::arima(lnreturns, order = c(0, 0, 1)))
+(dane.fit4 = stats::arima(lnreturns, order = c(1, 0, 2)))
+(dane.fit5 = stats::arima(lnreturns, order = c(0, 0, 2)))
+akaike <- c(
+  dane.fit1$aic,
+  dane.fit2$aic,
+  dane.fit3$aic,
+  dane.fit4$aic,
+  dane.fit5$aic
+)
+order(akaike)
+```
+
+Powyższe wyniki wskazują na to, że względem kryterium AIC model ARMA(1,2) jest najlepszy.
+
+Przejdźmy teraz do testu Ljungi-Boxa tego modelu:
+
+```{r, echo=FALSE, warning=FALSE}
+Box.test(lnreturns, lag = 20, type = "Ljung-Box")
+```
+
+Tutaj p-value jest zdecydowanie mniejsza niż 0.05, więc mamy podstawę do odrzucenia hipotezy zerowej.
+Nie możemy przyjąć, że błędy są niezależne.
+
+Sprawdzamy teraz który model będzie najlepszy z kryterium AIC, przy metodzie największej wiarygodności:
+
+```{r, warning=FALSE}
+dane.fitML1<-arima(lnreturns, order = c(1, 0, 1),method ="ML")
+dane.fitML2<-arima(lnreturns, order = c(1, 0, 0),method ="ML")
+dane.fitML3<-arima(lnreturns, order = c(0, 0, 1),method ="ML")
+dane.fitML4<-arima(lnreturns, order = c(1, 0, 2),method ="ML")
+dane.fitML5<-arima(lnreturns, order = c(0, 0, 2),method ="ML")
+akaike2 <- c(
+  dane.fitML1$aic,
+  dane.fitML2$aic,
+  dane.fitML3$aic,
+  dane.fitML4$aic,
+  dane.fitML5$aic
+)
+order(akaike2)
+```
+
+Najlepszy okazał się tutaj również model ARMA(1,2).
+
+```{r, echo=FALSE, warning=FALSE}
+par(mar = c(5, 5, 2, 2))
+dane.diag=tsdiag(dane.fitML3, gof.lag=20)
+mtext("ARMA(0,1)", line = 1, adj=1)
+```
+
+```{r, echo=FALSE, warning=FALSE}
+par(mar = c(5, 5, 2, 2))
+dane.diag=tsdiag(dane.fitML4, gof.lag=20)
+mtext("ARMA(1,2)", line = 1, adj=1)
+```
+
+Model ARMA(1,2) możemy uznać za dobry, ponieważ jego reszty znajdują się powyżej linii przerywanej, czyli powyżej 5%.
+Nie ma zatem podstaw, by odrzucić hipotezę zerową, że autokorelacja opóźnień odpowiednio 1,2...,20 jest równa 0.
+
+Przechodzimy teraz do automatycznego dopasowania modelu do szeregu czasowego:
+
+```{r, echo=FALSE, warning=FALSE}
+library(forecast)
+fit.autoARIMA1<-auto.arima(lnreturns,d=0,max.p=1,max.q=1,stepwise=FALSE,ic="aic")
+print(fit.autoARIMA1)
+```
+
+```{r, echo=FALSE, warning=FALSE}
+library(forecast)
+fit.autoARIMA2<-auto.arima(lnreturns,d=0,max.p=1,max.q=2,stepwise=FALSE,ic="aic")
+print(fit.autoARIMA2)
+```
+
+Względem kryterium AIC model ARMA(1,2) jest lepszy.
+Prognoza dla tego modelu wygląda następująco:
+
+```{r, echo=FALSE, warning=FALSE}
+par(mfrow=c(1,1), mar=c(5, 4, 4, 2) + 0.1) 
+plot(forecast(fit.autoARIMA2,h=50))
+```
+
+```{r, echo=FALSE, warning=FALSE}
+par(mfrow=c(2,1), mar=c(5, 4, 4, 2) + 0.1)
+autoplot(fit.autoARIMA1)
+autoplot(fit.autoARIMA2)
+```
+
+Model ARMA(0,1) ma pierwiastek rzeczywisty, którego odwrotność jest wewnątrz okręgu.
+Również w przypadku modelu ARMA(1,2), zarówno dla AR(1) jak i MA(2) pierwiastki są rzeczywiste, a ich odwrotność znajdują się w środku.
+Oznacza to, że procesy, które zostały wyestymowane, są procesami odwracalnymi.
+
+
+Rozważmy teraz reszty obu modeli: ARMA(0,1) i ARMA(1,2)
+
+```{r, echo=FALSE, warning=FALSE}
+reszty1<-fit.autoARIMA1$residuals
+reszty2<-dane.fitML4$residuals 
+Box.test(reszty1,lag=floor(log(length(fit.autoARIMA1$residuals))),type="Ljung")
+Box.test(reszty2,lag=floor(log(length(dane.fitML4$residuals))),type="Ljung")
+```
+
+W teście Ljungi-Boxa nie mamy podstaw do odrzucenia hipotezy zerowej.
+Może być tak, że błędy obu modeli są niezależne.
+Spójrzmy na test Shapiro-Wilka:
+
+```{r, echo=FALSE, warning=FALSE}
+shapiro.test(reszty1)
+shapiro.test(reszty2)
+```
+
+Z tego wynika, że przez p-value poniżej 0.05 nie można odrzucić hipotezy zerowej o normalności próbki danych w obu modelach.
+
+```{r, echo=FALSE, warning=FALSE}
+par(mfrow=c(2,1))
+qqnorm(reszty1,main = "Normal Q-Q Plot ARMA(0,1)")
+qqline(reszty1)
+qqnorm(reszty2,main = "Normal Q-Q Plot ARMA(1,2)")
+qqline(reszty2)
+```
+
+Zatem podsumowując wszystkie kryteria lepszym modelem mimo wszystko okazał się nasz ARMA(1,2).
+
+Ma on stacjonarne pierwiastki, jest kauzalny i jest procesem odwracalnym.
+
+# Prognozowanie ARIMA
+
+Rozważmy teraz proces logarytmicznych stóp zwrotu z jednokrotnym różnicowaniem.
+Naszych obserwacji jest 420, do prognozowania wybieramy 400 obserwacji, a pozostałych nie znamy.
+Dopasowanie modelu ARIMA do naszych danych:
+
+```{r, echo=FALSE, warning=FALSE}
+dane1<-lnreturns
+n<-length(dane1);
+T<- 400
+insample<-1:T 
+(dane.fit <-arima(dane1[insample], order = c(1, 1, 2), method ="ML"))
+```
+Spójrzmy teraz na prognozę punktową dla 20 obserwacji licząc od 401:
+
+```{r, echo=FALSE, warning=FALSE}
+(dane.forecast<-predict(dane.fit, n.ahead=(n-T)))
+```
+Szybko osiągana jest zbieżność, dlatego dalsze prognozy są na tym samym poziomie.
+Miara dokładności tej prognozy jest następująca:
+
+```{r, echo=FALSE, warning=FALSE}
+library(forecast)
+fc<-accuracy(dane.forecast$pred,dane1[(T+1):n])
+fc
+```
+
+Rozważmy ten model, który ocenia jakość prognoz, porównując prognozowane wartości z rzeczywistymi wartościami w próbie testowej.
+
+```{r, echo=FALSE, warning=FALSE}
+par(mfrow=c(2,1), mar=c(5, 4, 4, 2) + 0.1)
+dane.fit.Arima<-dane1[insample] %>%
+  Arima(order=c(1,1,2)) %>%
+  forecast(h=(n-T))
+fit<-accuracy(dane.fit.Arima)
+plot(dane.fit.Arima)
+plot(dane.fit.Arima)
+lines(dane1,col="red")
+```
+
+Czarny wykres to wykres dostępnych danych z pewną prognozą, natomiast niżej znajduje się ten sam wykres
+z tą różnicą, że została nałożona czerwona linia prezentująca dane rzeczywiste.
+
+# SARIMA(p,d,q)(P,D,Q)[m]
+
+Wracając do naszych danych pierwotnych, czyli średnich wartości cen biletów, przypomnijmy:
+
+```{r, echo=FALSE, warning=FALSE}
+library(forecast)
+Dane1<-Dane$Numbers
+tsdisplay(Dane1)
+```
+
+Widać, że ACF powoli wygasa, co jest związane z występowaniem trendu liniowego.
+Natomiast wysoka wartość PACF dla pierwszego opóźnienia oznacza, że AR(1) będzie dobrym kandydatem.
+Nie pozbywamy się żadnych danych, ponieważ mamy pełne lata.
+Skoro dane mamy miesięczne, więc częstotliwość jest ustawiona na 12.
+
+```{r, echo=FALSE, warning=FALSE}
+dane_ts<-ts(Dane$Numbers, start=1989, frequency=12)
+Numbers<-Dane$Numbers
+plot(dane_ts)
+```
+
+Spójrzmy teraz na dekompozycję:
+
+```{r, echo=FALSE, warning=FALSE}
+plot(decompose(dane_ts))
+```
+Na wykresie trendu widać że był jeden znaczny spadek w średniej cenie biletów, a w pozostałych przypadkach były umiarkowane wzrosty połączone ze spadkami, mamy do czynienia z trendem rosnącym, możemy przypuszczać że sezonowość w naszych danych spowodowana jest tym, że ludzie częściej podróżują w wakacje albo w okresie świątecznym.
+Ponieważ w danych występuje sezonowość, wprowadźmy nowy model SARIMA(p,d,q)(P,D,Q)[m], gdzie: m=12, d=1, D=0, gdyż:
+
+```{r, echo=FALSE, warning=FALSE}
+nsdiffs(dane_ts)
+ndiffs(dane_ts)
+```
+Przyjrzyjmy się teraz szeregom:
+
+```{r, echo=FALSE, warning=FALSE}
+par(mfrow=c(2,2))
+options(scipen=999)
+plot(Dane,type="l")
+plot(diff(Dane_b),type="l")
+plot(diff(Dane_b,lag=12),type="l")
+plot(diff(diff(Dane_b),lag=12),type="l")
+```
+
+Pierwszy wykres przedstawia wyjściowy szereg.
+Wykres po jego prawej jest wykresem powstałym przez jednokrotne różnicowanie, co usunęło nam trend.
+Wykres na dole po lewej jest wykresem powstałym przez 12-krotne różnicowanie.
+Wykres po jego prawej stronie powstał przez 12-krotne różnicowanie, a następnie jednokrotne.
+Ten zabieg usunął nam sezonowość.
+
+```{r, echo=FALSE, warning=FALSE}
+sqrt(length(Dane$Numbers))
+```
+
+Bierzemy pod uwagę opóźnienia do 20.
+
+```{r, echo=FALSE, warning=FALSE}
+library(TSA)
+par(mfrow = c(2, 2))    
+acf(Dane$Numbers, 40, drop.lag.0 = TRUE)
+pacf(Dane$Numbers,40)
+acf(diff(Dane$Numbers),40,drop.lag.0 = TRUE)
+pacf(diff(Dane$Numbers),40)
+```
+
+Po jednokrotnym różnicowaniu widać w ACF sezonowość.
+Bierzemy pod uwagę opóźnienia do 20.
+Dla modelu jednokrotnie, a następnie dwunastokrotnie różnicowanego mamy:
+
+```{r, echo=FALSE, warning=FALSE}
+library(forecast)
+trans_Dane<-Dane$Numbers %>% diff() %>% diff(lag=12)
+tsdisplay(trans_Dane)
+plot(trans_Dane)
+```
+
+Widać tutaj, że słupek w opóźnieniu 1 zarówno w ACF jak i PACF jest poza pasem.
+Rozważmy, gdy P=1 lub gdy Q=1.
+
+Proponujemy modele: SARIMA(0,1,1)(0,0,1)[12] oraz SARIMA(0,1,1)(1,0,0)[12].
+
+
+```{r, echo=FALSE, warning=FALSE}
+Dane$Numbers %>%
+  Arima(order=c(0,1,1), seasonal=list(order=c(0,0,1),period=12)) %>%
+  residuals() %>% ggtsdisplay()
+```
+SARIMA(0,1,1)(0,0,1)[12].
+
+```{r, echo=FALSE, warning=FALSE}
+Dane$Numbers %>%
+  Arima(order=c(0,1,1), seasonal=list(order=c(1,0,0),period=12)) %>%
+  residuals() %>% ggtsdisplay()
+```
+SARIMA(0,1,1)(1,0,0)[12]
+Słupki w ACF i PACF są wiarygodne do opóźnienia 20/21, gdzie widać, że 95% wartości funkcji ACF i PACF znajduje się w pasie.
+Można powiedzieć, że reszty zachowują się na poziomie ACF i PACF przyzwoicie.
+
+```{r, echo=FALSE, warning=FALSE}
+Dane_fit1<-Arima(Dane$Numbers,order=c(0,1,1), seasonal=list(order=c(0,0,1),period=12))
+Dane_fit2<-Arima(Dane$Numbers,order=c(0,1,1), seasonal=list(order=c(1,0,0),period=12))
+Dane_fit1$aic
+Dane_fit2$aic
+```
+
+Według kryterium AIC widać, że model pierwszy, czyli SARIMA(0,1,1)(0,0,1)[12] okazał się być lepszy.
+Poniższy wykres przedstawia prognozy średnich cen na kolejne 12 okresów.
+
+```{r, echo=FALSE, warning=FALSE}
+Dane_fit1 %>% forecast(h=12) %>% autoplot()
+```
+
+Weźmy pod uwagę również model, który został wygenerowany przez program jako najlepszy:
+
+```{r, echo=FALSE, warning=FALSE}
+options(digits = 10)
+Dane_fit_auto<-auto.arima(dane_ts,stepwise=FALSE,ic="aicc")
+Dane_fit_auto
+```
+
+Auto.arima sugeruje, że lepszym modelem będzie SARIMA(1,1,2)(0,0,2)[12].
+Sprawdźmy zatem, który z tych trzech jest najlepszy.
+
+```{r, echo=FALSE, warning=FALSE}
+checkresiduals(Dane_fit_auto)
+summary(Dane_fit_auto)
+```
+
+```{r, echo=FALSE, warning=FALSE}
+checkresiduals(Dane_fit1)
+summary(Dane_fit1) 
+```
+
+```{r, echo=FALSE, warning=FALSE}
+checkresiduals(Dane_fit2)
+summary(Dane_fit2)
+```
+
+Okazuje się, że model wygenerowany automatycznie jest najlepszy nie tylko pod kątem kryterium AIC, ale również błędów średniokwadratowych (RMSE) oraz log likelihood.
+Zatem z rozważanych modeli najlepszy jest SARIMA(1,1,2)(0,0,2)[12].
